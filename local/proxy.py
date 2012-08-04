@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 # coding:utf-8
-# Based on GAppProxy 2.0.0 by Du XiaoGang <dugang@188.com>
-# Based on WallProxy 0.4.0 by hexieshe <www.ehust@gmail.com>
 
 from __future__ import with_statement
 
-__version__ = '1.8.11'
-__author__  = "{phus.lu,hewigovens}@gmail.com (Phus Lu and Hewig Xu)"
-__config__  = 'proxy.ini'
+__version__ = '1.8.20'
+__author__  = "hkxseven007@gmail.com"
+__config__  = 'config.cfg'
 
 try:
     import gevent, gevent.monkey
@@ -1317,7 +1315,7 @@ def main():
         sys.modules['logging'] = logging = SimpleLogging()
     logging.basicConfig(level=logging.DEBUG if common.GAE_DEBUGLEVEL else logging.INFO, format='%(levelname)s - - %(asctime)s %(message)s', datefmt='[%b %d %H:%M:%S]')
     if ctypes and os.name == 'nt':
-        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent v%s' % __version__)
+        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition')
         if not common.LOVE_TIMESTAMP.strip():
             sys.stdout.write('Double click addto-startup.vbs could add goagent to autorun programs. :)\n')
         try_show_love()
