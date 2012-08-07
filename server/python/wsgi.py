@@ -2,7 +2,7 @@
 # coding=utf-8
 
 __version__ = '1.8.20'
-__author__ =  'phus.lu@gmail.com'
+__author__ =  'hkxseven007@gmail.com'
 __password__ = ''
 
 import sys, os, re, time, struct, zlib, binascii, logging, httplib, urlparse
