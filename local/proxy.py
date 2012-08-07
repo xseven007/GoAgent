@@ -84,20 +84,8 @@ class Common(object):
             self.PAC_IP               = self.CONFIG.get('pac','ip')
             self.PAC_PORT             = self.CONFIG.getint('pac','port')
             self.PAC_FILE             = self.CONFIG.get('pac','file').lstrip('/')
-            self.PAC_UPDATE           = self.CONFIG.getint('pac', 'update')
-            self.PAC_REMOTE           = self.CONFIG.get('pac', 'remote')
-            self.PAC_TIMEOUT          = self.CONFIG.getint('pac', 'timeout')
-            self.PAC_DIRECTS          = self.CONFIG.get('pac', 'direct').split('|') if self.CONFIG.get('pac', 'direct') else []
         else:
             self.PAC_ENABLE           = 0
-
-        if self.CONFIG.has_section('socks5'):
-            self.SOCKS5_ENABLE       = self.CONFIG.getint('socks5', 'enable')
-            self.SOCKS5_LISTEN       = self.CONFIG.get('socks5', 'listen')
-            self.SOCKS5_PASSWORD     = self.CONFIG.get('socks5', 'password') if self.CONFIG.has_option('socks5', 'password') else ''
-            self.SOCKS5_FETCHSERVER  = self.CONFIG.get('socks5', 'fetchserver')
-        else:
-            self.SOCKS_ENABLE        = 0
 
         self.PROXY_ENABLE         = self.CONFIG.getint('proxy', 'enable')
         self.PROXY_HOST           = self.CONFIG.get('proxy', 'host')
