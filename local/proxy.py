@@ -1293,7 +1293,7 @@ def main():
         sys.modules['logging'] = logging = SimpleLogging()
     logging.basicConfig(level=logging.DEBUG if common.GAE_DEBUGLEVEL else logging.INFO, format='%(levelname)s - - %(asctime)s %(message)s', datefmt='[%b %d %H:%M:%S]')
     if ctypes and os.name == 'nt':
-        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition)
+        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition')
         if not common.LOVE_TIMESTAMP.strip():
             sys.stdout.write('Double click addto-startup.vbs could add goagent to autorun programs. :)\n')
         try_show_love()
