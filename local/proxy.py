@@ -51,6 +51,9 @@ try:
 except ImportError:
     OpenSSL = None
 
+class HTTPNoRedirectHandler(urllib2.HTTPRedirectHandler):
+    http_error_301 = http_error_302 = http_error_303 = http_error_304 = http_error_307 = urllib2.HTTPDefaultErrorHandler.http_error_default
+
 class Common(object):
     """global config object"""
 
@@ -144,11 +147,12 @@ class Common(object):
     def install_opener(self):
         """install urllib2 opener"""
         httplib.HTTPMessage = SimpleMessageClass
+        handlers = [HTTPNoRedirectHandler]
         if self.PROXY_ENABLE:
             proxy = '%s:%s@%s:%d'%(self.PROXY_USERNAME, self.PROXY_PASSWROD, self.PROXY_HOST, self.PROXY_PORT)
-            handlers = [urllib2.ProxyHandler({'http':proxy,'https':proxy})]
+            handlers += [urllib2.ProxyHandler({'http':proxy,'https':proxy})]
         else:
-            handlers = [urllib2.ProxyHandler({})]
+            handlers += [urllib2.ProxyHandler({})]
         opener = urllib2.build_opener(*handlers)
         opener.addheaders = []
         urllib2.install_opener(opener)
@@ -376,6 +380,30 @@ def httplib_HTTPConnection_putrequest(self, method, url, skip_host=0, skip_accep
     #self._output('\r\n\r\n')
     return _httplib_HTTPConnection_putrequest(self, method, url, skip_host, skip_accept_encoding)
 httplib.HTTPConnection.putrequest = httplib_HTTPConnection_putrequest
+
+def httplib_headers_normalize(response_headers):
+    """return (headers, content_encoding, transfer_encoding)"""
+    headers = []
+    for keyword, value in response_headers:
+        if keyword == 'connection':
+            headers.append(('Connection', 'close'))
+        elif keyword != 'set-cookie':
+            headers.append((keyword.title(), value))
+        else:
+            scs = value.split(', ')
+            cookies = []
+            i = -1
+            for sc in scs:
+                if re.match(r'[^ =]+ ', sc):
+                    try:
+                        cookies[i] = '%s, %s' % (cookies[i], sc)
+                    except IndexError:
+                        pass
+                else:
+                    cookies.append(sc)
+                    i += 1
+            headers += [('Set-Cookie', x) for x in cookies]
+    return headers
 
 class CertUtil(object):
     '''CertUtil module, based on WallProxy 0.4.0'''
@@ -1147,52 +1175,37 @@ class PAASProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         headers = {'Cookie':base64.b64encode(zlib.compress(params)).strip()}
 
         payload = None
-        if int(self.headers.get('Content-Length',0)):
-            payload = self.rfile
-
-        scheme, netloc, path, params, query, fragment = urlparse.urlparse(common.PAAS_FETCHSERVER)
-        HTTPConnection = httplib.HTTPSConnection if scheme == 'https' else httplib.HTTPConnection
+        content_length = int(self.headers.get('Content-Length',0))
+        if content_length:
+            payload = self.rfile.read(content_length)
 
         try:
-            conn = HTTPConnection(netloc, timeout=8)
-            conn.request('POST', '/', body=payload, headers=headers)
-            response = conn.getresponse()
-            headers = []
-            for keyword, value in response.getheaders():
-                keyword = keyword.title()
-                if keyword == 'Connection':
-                    headers.append(('Connection', 'close'))
-                elif keyword != 'Set-Cookie':
-                    headers.append((keyword.title(), value))
-                else:
-                    scs = value.split(', ')
-                    cookies = []
-                    i = -1
-                    for sc in scs:
-                        if re.match(r'[^ =]+ ', sc):
-                            try:
-                                cookies[i] = '%s, %s' % (cookies[i], sc)
-                            except IndexError:
-                                pass
-                        else:
-                            cookies.append(sc)
-                            i += 1
-                    headers += [('Set-Cookie', x) for x in cookies]
+            request  = urllib2.Request(common.PAAS_FETCHSERVER, data=payload, headers=headers)
 
-            self.send_response(response.status)
+            try:
+                response = urllib2.urlopen(request)
+            except urllib2.HTTPError as http_error:
+                response = http_error
+            except urllib2.URLError as url_error:
+                raise
+
+            headers = [(k.title(), v.strip()) for k, _, v in (line.partition(':') for line in response.headers.headers) if k.title() != 'Transfer-Encoding']
+
+            self.send_response(response.code, response.msg)
             for keyword, value in headers:
                 self.send_header(keyword, value)
             self.end_headers()
+
             while 1:
-                data = response.fp.read(8192)
+                data = response.read(8192)
                 if not data:
+                    response.close()
                     break
                 else:
                     self.wfile.write(data)
         except httplib.HTTPException as e:
             raise
-        finally:
-            conn.close()
+
 
     def do_CONNECT(self):
         host, _, port = self.path.rpartition(':')
@@ -1280,7 +1293,7 @@ def main():
         sys.modules['logging'] = logging = SimpleLogging()
     logging.basicConfig(level=logging.DEBUG if common.GAE_DEBUGLEVEL else logging.INFO, format='%(levelname)s - - %(asctime)s %(message)s', datefmt='[%b %d %H:%M:%S]')
     if ctypes and os.name == 'nt':
-        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition')
+        ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition)
         if not common.LOVE_TIMESTAMP.strip():
             sys.stdout.write('Double click addto-startup.vbs could add goagent to autorun programs. :)\n')
         try_show_love()

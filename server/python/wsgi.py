@@ -5,7 +5,7 @@ __version__ = '1.8.20'
 __author__ =  'hkxseven007@gmail.com'
 __password__ = ''
 
-import sys, os, re, time, struct, zlib, binascii, logging, httplib, urlparse
+import sys, os, re, time, struct, zlib, binascii, logging, httplib, urllib2, urlparse
 try:
     from google.appengine.api import urlfetch
     from google.appengine.runtime import apiproxy_errors, DeadlineExceededError
@@ -38,6 +38,33 @@ def io_copy(source, dest):
     finally:
         pass
 
+def httplib_headers_normalize(response_headers):
+    """return (headers, content_encoding, transfer_encoding)"""
+    headers = []
+    for keyword, value in response_headers:
+        if keyword == 'connection':
+            headers.append(('Connection', 'close'))
+        elif keyword != 'set-cookie':
+            headers.append((keyword.title(), value))
+        else:
+            scs = value.split(', ')
+            cookies = []
+            i = -1
+            for sc in scs:
+                if re.match(r'[^ =]+ ', sc):
+                    try:
+                        cookies[i] = '%s, %s' % (cookies[i], sc)
+                    except IndexError:
+                        pass
+                else:
+                    cookies.append(sc)
+                    i += 1
+            headers += [('Set-Cookie', x) for x in cookies]
+    return headers
+
+class HTTPNoRedirectHandler(urllib2.HTTPRedirectHandler):
+    http_error_301 = http_error_302 = http_error_303 = http_error_304 = http_error_307 = urllib2.HTTPDefaultErrorHandler.http_error_default
+
 def paas_application(environ, start_response):
     cookie  = environ['HTTP_COOKIE']
     request = decode_data(zlib.decompress(cookie.decode('base64')))
@@ -45,52 +72,34 @@ def paas_application(environ, start_response):
     url     = request['url']
     method  = request['method']
 
-    logging.info('%s:%s "%s %s %s" - -', environ['REMOTE_ADDR'], environ['REMOTE_PORT'], method, url, 'HTTP/1.1')
+    logging.info('%s "%s %s %s" - -', environ['REMOTE_ADDR'], method, url, 'HTTP/1.1')
 
     headers = dict((k.title(),v.lstrip()) for k, _, v in (line.partition(':') for line in request['headers'].splitlines()))
 
     payload = None
-    if int(headers.get('Content-Length',0)):
-        payload = environ['wsgi.input']
+    content_length = int(headers.get('Content-Length',0))
+    if content_length:
+        payload = environ['wsgi.input'].read(content_length)
 
     if method != 'CONNECT':
-        scheme, netloc, path, params, query, fragment = urlparse.urlparse(url)
-        HTTPConnection = httplib.HTTPSConnection if scheme == 'https' else httplib.HTTPConnection
-        if params:
-            path += ';' + params
-        if query:
-            path += '?' + query
         try:
-            conn = HTTPConnection(netloc, timeout=Deadline)
-            conn.request(method, path, body=payload, headers=headers)
-            response = conn.getresponse()
-            status_line = '%s %s' % (response.status, httplib.responses.get(response.status, 'UNKNOWN'))
-            headers = []
-            for keyword, value in response.getheaders():
-                if keyword == 'connection':
-                    headers.append(('Connection', 'close'))
-                if keyword != 'set-cookie':
-                    headers.append((keyword.title(), value))
-                else:
-                    scs = value.split(', ')
-                    cookies = []
-                    i = -1
-                    for sc in scs:
-                        if re.match(r'[^ =]+ ', sc):
-                            try:
-                                cookies[i] = '%s, %s' % (cookies[i], sc)
-                            except IndexError:
-                                pass
-                        else:
-                            cookies.append(sc)
-                            i += 1
-                    headers += [('Set-Cookie', x) for x in cookies]
-            start_response(status_line, headers)
+            opener   = urllib2.build_opener(HTTPNoRedirectHandler)
+            request  = urllib2.Request(url, data=payload, headers=headers)
+            request.get_method = lambda:method
+
+            try:
+                response = opener.open(request)
+            except urllib2.HTTPError as http_error:
+                response = http_error
+            except urllib2.URLError as url_error:
+                raise
+
+            headers = [(k, v.strip()) for k, _, v in (line.partition(':') for line in response.headers.headers) if k != 'Transfer-Encoding']
+            start_response('%d %s' % (response.code, response.msg), headers)
             while 1:
                 data = response.read(8192)
                 if not data:
                     response.close()
-                    conn.close()
                     raise StopIteration
                 else:
                     yield data
@@ -229,7 +238,7 @@ if __name__ == '__main__':
         ssl_args = dict(certfile=os.path.splitext(__file__)[0]+'.pem')
     else:
         ssl_args = dict()
-    server = gevent.pywsgi.WSGIServer((host, int(port)), application, **ssl_args)
+    server = gevent.pywsgi.WSGIServer((host, int(port)), application, log=None, **ssl_args)
     server.environ.pop('SERVER_SOFTWARE')
     logging.info('serving %s://%s:%s/wsgi.py', 'https' if ssl_args else 'http', server.address[0] or '0.0.0.0', server.address[1])
     server.serve_forever()
