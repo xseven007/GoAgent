@@ -1,4 +1,6 @@
-// Copyright 2012 Phus Lu. All rights reserved.
+// GoAgent Golang Fetch Server
+// Contributor:
+//      Rabbit Xie        <hkxseven007@gmail.com>
 
 package fetch
 
@@ -21,7 +23,6 @@ import (
 
 const (
     Version  = "1.8.6"
-    Author   = "phus.lu@gmail.com"
     Password = ""
 
     FetchMax     = 3
@@ -239,7 +240,7 @@ func (h Handler) get() {
     
     h.response.WriteHeader(http.StatusOK)
     h.response.Header().Set("Content-Type", "text/html; charset=utf-8")
-    fmt.Fprintf(h.response, "GoAgent Go Server %s \xe5\xb7\xb2\xe7\xbb\x8f\xe5\x9c\xa8\xe5\xb7\xa5\xe4\xbd\x9c\xe4\xba\x86\xef\xbc\x8c\xe9\x83\xa8\xe7\xbd\xb2\xe6\x97\xb6\xe9\x97\xb4 %s\n", Version, ctime)
+    fmt.Fprintf(h.response, "GoAgent Go Server Xseven Special edition %s \xe5\xb7\xb2\xe7\xbb\x8f\xe5\x9c\xa8\xe5\xb7\xa5\xe4\xbd\x9c\xe4\xba\x86\xef\xbc\x8c\xe9\x83\xa8\xe7\xbd\xb2\xe6\x97\xb6\xe9\x97\xb4 %s\n", Version, ctime)
 }
 
 func init() {

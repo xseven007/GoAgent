@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # coding=utf-8
+# Contributor:
+#      Rabbit Xie        <hkxseven007@gmail.com>
 
-__version__ = '1.8.20'
-__author__ =  'hkxseven007@gmail.com'
+__version__ = '1.10.0'
 __password__ = ''
 
-import sys, os, re, time, struct, zlib, binascii, logging, httplib, urllib2, urlparse
+import sys, os, re, time, struct, zlib, binascii, logging, httplib, urlparse
 try:
     from google.appengine.api import urlfetch
     from google.appengine.runtime import apiproxy_errors, DeadlineExceededError
@@ -38,10 +39,53 @@ def io_copy(source, dest):
     finally:
         pass
 
-def httplib_headers_normalize(response_headers):
+def fileobj_to_generator(fileobj, bufsize=8192, gzipped=False):
+    assert hasattr(fileobj, 'read')
+    if not gzipped:
+        while 1:
+            data = fileobj.read(bufsize)
+            if not data:
+                fileobj.close()
+                break
+            else:
+                yield data
+    else:
+        compressobj = zlib.compressobj(zlib.Z_BEST_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS, zlib.DEF_MEM_LEVEL, 0)
+        crc         = zlib.crc32('')
+        size        = 0
+        yield '\037\213\010\000' '\0\0\0\0' '\002\377'
+        while 1:
+            data = fileobj.read(bufsize)
+            if not data:
+                break
+            crc = zlib.crc32(data, crc)
+            size += len(data)
+            zdata = compressobj.compress(data)
+            if zdata:
+                yield zdata
+        zdata = compressobj.flush()
+        if zdata:
+            yield zdata
+        yield struct.pack('<LL', crc&0xFFFFFFFFL, size&0xFFFFFFFFL)
+
+def httplib_request(method, url, body=None, headers={}, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
+    scheme, netloc, path, params, query, fragment = urlparse.urlparse(url)
+    HTTPConnection = httplib.HTTPSConnection if scheme == 'https' else httplib.HTTPConnection
+    if params:
+        path += ';' + params
+    if query:
+        path += '?' + query
+    conn = HTTPConnection(netloc, timeout=timeout)
+    conn.request(method, path, body=body, headers=headers)
+    response = conn.getresponse()
+    return response
+
+def httplib_normalize_headers(response_headers, skip_headers=[]):
     """return (headers, content_encoding, transfer_encoding)"""
     headers = []
     for keyword, value in response_headers:
+        if keyword.title() in skip_headers:
+            continue
         if keyword == 'connection':
             headers.append(('Connection', 'close'))
         elif keyword != 'set-cookie':
@@ -62,9 +106,6 @@ def httplib_headers_normalize(response_headers):
             headers += [('Set-Cookie', x) for x in cookies]
     return headers
 
-class HTTPNoRedirectHandler(urllib2.HTTPRedirectHandler):
-    http_error_301 = http_error_302 = http_error_303 = http_error_304 = http_error_307 = urllib2.HTTPDefaultErrorHandler.http_error_default
-
 def paas_application(environ, start_response):
     cookie  = environ['HTTP_COOKIE']
     request = decode_data(zlib.decompress(cookie.decode('base64')))
@@ -76,35 +117,108 @@ def paas_application(environ, start_response):
 
     headers = dict((k.title(),v.lstrip()) for k, _, v in (line.partition(':') for line in request['headers'].splitlines()))
 
-    payload = None
-    content_length = int(headers.get('Content-Length',0))
-    if content_length:
-        payload = environ['wsgi.input'].read(content_length)
+    data = environ['wsgi.input'] if int(headers.get('Content-Length',0)) else None
 
     if method != 'CONNECT':
         try:
-            opener   = urllib2.build_opener(HTTPNoRedirectHandler)
-            request  = urllib2.Request(url, data=payload, headers=headers)
-            request.get_method = lambda:method
+            response = httplib_request(method, url, body=data, headers=headers, timeout=16)
 
-            try:
-                response = opener.open(request)
-            except urllib2.HTTPError as http_error:
-                response = http_error
-            except urllib2.URLError as url_error:
-                raise
+            status_line = '%d %s' % (response.status, httplib.responses.get(response.status, 'OK'))
+            headers = httplib_normalize_headers(response.getheaders(), skip_headers=['Transfer-Encoding'])
 
-            headers = [(k, v.strip()) for k, _, v in (line.partition(':') for line in response.headers.headers) if k != 'Transfer-Encoding']
-            start_response('%d %s' % (response.code, response.msg), headers)
-            while 1:
-                data = response.read(8192)
-                if not data:
-                    response.close()
-                    raise StopIteration
-                else:
-                    yield data
+            gzipped = False
+##            if response.getheader('content-encoding') != 'gzip' and response.getheader('content-length'):
+##                if response.getheader('content-type', '').startswith(('text/', 'application/json', 'application/javascript')):
+##                    headers += [('Content-Encoding', 'gzip')]
+##                    gzipped = True
+
+            start_response(status_line, headers)
+            return fileobj_to_generator(response, gzipped=gzipped)
         except httplib.HTTPException as e:
             raise
+
+def socket_forward(local, remote, timeout=60, tick=2, bufsize=8192, maxping=None, maxpong=None, idlecall=None):
+    timecount = timeout
+    try:
+        while 1:
+            timecount -= tick
+            if timecount <= 0:
+                break
+            (ins, _, errors) = select.select([local, remote], [], [local, remote], tick)
+            if errors:
+                break
+            if ins:
+                for sock in ins:
+                    data = sock.recv(bufsize)
+                    if data:
+                        if sock is local:
+                            remote.sendall(data)
+                            timecount = maxping or timeout
+                        else:
+                            local.sendall(data)
+                            timecount = maxpong or timeout
+                    else:
+                        return
+            else:
+                if idlecall:
+                    try:
+                        idlecall()
+                    except Exception:
+                        logging.exception('socket_forward idlecall fail')
+                    finally:
+                        idlecall = None
+    except Exception:
+        logging.exception('socket_forward error')
+        raise
+    finally:
+        if idlecall:
+            idlecall()
+
+def paas_socks5(environ, start_response):
+    wsgi_input = environ['wsgi.input']
+    sock = None
+    rfile = None
+    if hasattr(wsgi_input, 'rfile'):
+        sock = wsgi_input.rfile._sock
+        rfile = wsgi_input.rfile
+    elif hasattr(wsgi_input, '_sock'):
+        sock = wsgi_input._sock
+    elif hasattr(wsgi_input, 'fileno'):
+        sock = socket.fromfd(wsgi_input.fileno())
+    if not sock:
+        raise RuntimeError('cannot extract socket from wsgi_input=%r' % wsgi_input)
+    # 1. Version
+    if not rfile:
+        rfile = sock.makefile('rb', -1)
+    rfile.read(ord(rfile.read(2)[-1]))
+    sock.send(b'\x05\x00');
+    # 2. Request
+    data = rfile.read(4)
+    mode = ord(data[1])
+    addrtype = ord(data[3])
+    if addrtype == 1:       # IPv4
+        addr = socket.inet_ntoa(rfile.read(4))
+    elif addrtype == 3:     # Domain name
+        addr = rfile.read(ord(sock.recv(1)[0]))
+    port = struct.unpack('>H', rfile.read(2))
+    reply = b'\x05\x00\x00\x01'
+    try:
+        logging.info('paas_socks5 mode=%r', mode)
+        if mode == 1:  # 1. TCP Connect
+            remote = socket.create_connection((addr, port[0]))
+            logging.info('TCP Connect to %s:%s', addr, port[0])
+            local = remote.getsockname()
+            reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
+        else:
+            reply = b'\x05\x07\x00\x01' # Command not supported
+    except socket.error:
+        # Connection refused
+        reply = '\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00'
+    sock.send(reply)
+    # 3. Transfering
+    if reply[1] == '\x00':  # Success
+        if mode == 1:    # 1. Tcp connect
+            socket_forward(sock, remote)
 
 def encode_data(dic):
     return '&'.join('%s=%s' % (k, binascii.b2a_hex(v)) for k, v in dic.iteritems() if v)
@@ -214,7 +328,10 @@ def app(environ, start_response):
     if urlfetch and environ['REQUEST_METHOD'] == 'POST':
         return gae_post(environ, start_response)
     elif not urlfetch:
-        return paas_application(environ, start_response)
+        if environ['PATH_INFO'] == 'socks5':
+            return paas_socks5(environ, start_response)
+        else:
+            return paas_application(environ, start_response)
     else:
         return gae_get(environ, start_response)
 
