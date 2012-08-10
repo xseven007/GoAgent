@@ -2,7 +2,9 @@
 # coding:utf-8
 
 # Contributor:
-#      Rabbit Xie        <hkxseven007@gmail.com>
+#      Phus Lu        <phus.lu@gmail.com>
+#      Hewig Xu       <hewigovens@gmail.com>
+#      Rabbit Xie     <hkxseven007@gmail.com>
 
 from __future__ import with_statement
 
