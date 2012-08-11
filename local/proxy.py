@@ -490,7 +490,7 @@ class CertUtil(object):
             ca = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, fp.read())
 
         pkey = OpenSSL.crypto.PKey()
-        pkey.generate_key(OpenSSL.crypto.TYPE_RSA, 1024)
+        pkey.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
 
         req = OpenSSL.crypto.X509Req()
         subj = req.get_subject()
@@ -500,7 +500,7 @@ class CertUtil(object):
         subj.organizationName = commonname
         subj.organizationalUnitName = 'GoAgent Branch'
         subj.commonName = commonname
-        sans = sans or CertUtil.SubjectAltNames
+        sans = (sans or [commonname]) + CertUtil.SubjectAltNames
         req.add_extensions([OpenSSL.crypto.X509Extension(b'subjectAltName', True, ', '.join('DNS: %s' % x for x in sans))])
         req.set_pubkey(pkey)
         req.sign(pkey, 'sha1')
