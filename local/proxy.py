@@ -453,25 +453,26 @@ class CertUtil(object):
         ca = OpenSSL.crypto.X509()
         ca.set_serial_number(0)
         ca.set_version(2)
-        ca.countryName = 'CN'
-        ca.stateOrProvinceName = 'Internet'
-        ca.localityName = 'Cernet'
-        ca.organizationName = 'GoAgent'
-        ca.organizationalUnitName = 'GoAgent Root'
-        ca.commonName = 'GoAgent'
+        subj = ca.get_subject()
+        subj.countryName = 'CN'
+        subj.stateOrProvinceName = 'Internet'
+        subj.localityName = 'Cernet'
+        subj.organizationName = 'GoAgent'
+        subj.organizationalUnitName = 'GoAgent Root'
+        subj.commonName = 'GoAgent'
         ca.gmtime_adj_notBefore(0)
         ca.gmtime_adj_notAfter(24 * 60 * 60 * 3652)
         ca.set_issuer(ca.get_subject())
         ca.set_pubkey(key)
         ca.add_extensions([
-          OpenSSL.crypto.X509Extension(b"basicConstraints", True, b"CA:TRUE"),
-          OpenSSL.crypto.X509Extension(b"nsCertType", True, b"sslCA"),
-          OpenSSL.crypto.X509Extension(b"extendedKeyUsage", True,
-            b"serverAuth,clientAuth,emailProtection,timeStamping,msCodeInd,msCodeCom,msCTLSign,msSGC,msEFS,nsSGC"),
-          OpenSSL.crypto.X509Extension(b"keyUsage", False, b"keyCertSign, cRLSign"),
-          OpenSSL.crypto.X509Extension(b"subjectKeyIdentifier", False, b"hash", subject=ca),
+          OpenSSL.crypto.X509Extension(b'basicConstraints', True, b'CA:TRUE'),
+          OpenSSL.crypto.X509Extension(b'nsCertType', True, b'sslCA'),
+          OpenSSL.crypto.X509Extension(b'extendedKeyUsage', True,
+            b'serverAuth,clientAuth,emailProtection,timeStamping,msCodeInd,msCodeCom,msCTLSign,msSGC,msEFS,nsSGC'),
+          OpenSSL.crypto.X509Extension(b'keyUsage', False, b'keyCertSign, cRLSign'),
+          OpenSSL.crypto.X509Extension(b'subjectKeyIdentifier', False, b'hash', subject=ca),
           ])
-        ca.sign(key, "sha1")
+        ca.sign(key, 'sha1')
         return key, ca
 
     @staticmethod
@@ -516,7 +517,7 @@ class CertUtil(object):
         cert.set_issuer(ca.get_subject())
         cert.set_subject(req.get_subject())
         cert.set_pubkey(req.get_pubkey())
-        sans = sans or CertUtil.SubjectAltNames
+        sans = (sans or [commonname]) + CertUtil.SubjectAltNames
         cert.add_extensions([OpenSSL.crypto.X509Extension(b'subjectAltName', True, ', '.join('DNS: %s' % x for x in sans))])
         cert.sign(key, 'sha1')
 
