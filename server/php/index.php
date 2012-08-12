@@ -6,6 +6,7 @@
 
 $__version__  = '1.10.0';
 $__password__ = '';
+$__timeout__  = 20;
 
 function encode_data($dic) {
     $a = array();
@@ -28,11 +29,13 @@ function decode_data($qs) {
 
 function header_function($ch, $header){
     header($header);
+    $GLOBALS['header_length'] += 1;
     return strlen($header);
 }
 
 function write_function($ch, $body){
     echo $body;
+    $GLOBALS['body_length'] += 1;
     return strlen($body);
 }
 
@@ -51,7 +54,7 @@ function post()
     }
     $headers['connection'] = 'close';
     $body = @gzuncompress(@file_get_contents('php://input'));
-    $timeout = 16;
+    $timeout = $GLOBALS['__timeout__'];
 
     $response_headers = array();
 
@@ -82,8 +85,6 @@ function post()
 
     $curl_opt[CURLOPT_CONNECTTIMEOUT] = $timeout;
     $curl_opt[CURLOPT_TIMEOUT]        = $timeout;
-    $curl_opt[CURLOPT_TIMEOUT]        = $timeout;
-    $curl_opt[CURLOPT_CONNECTTIMEOUT] = $timeout;
 
     $curl_opt[CURLOPT_SSL_VERIFYPEER] = false;
     $curl_opt[CURLOPT_SSL_VERIFYHOST] = false;
@@ -121,7 +122,7 @@ function post()
     $ret = curl_exec($ch);
     //$status_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $errno = curl_errno($ch);
-    if ($errno) {
+    if ($errno && !isset($GLOBALS['header_length'])) {
         echo $errno . ': ' .curl_error($ch);
     }
     curl_close($ch);
