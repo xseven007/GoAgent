@@ -1,7 +1,7 @@
 // GoAgent Golang Fetch Server
 // Contributor:
 //      Phus Lu        <phus.lu@gmail.com>
-//      Rabbit Xie     <hkxseven007@gmail.com>
+//      Phoenix Xie     <hkxseven007@gmail.com>
 
 package fetch
 

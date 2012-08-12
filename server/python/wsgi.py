@@ -2,7 +2,7 @@
 # coding=utf-8
 # Contributor:
 #      Phus Lu        <phus.lu@gmail.com>
-#      Rabbit Xie     <hkxseven007@gmail.com> 
+#      Phoenix Xie     <hkxseven007@gmail.com> 
 
 __version__ = '1.10.0'
 __password__ = ''
