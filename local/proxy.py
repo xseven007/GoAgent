@@ -117,7 +117,7 @@ class Common(object):
         self.FETCHMAX_LOCAL       = self.CONFIG.getint('fetchmax', 'local') if self.CONFIG.get('fetchmax', 'local') else 3
         self.FETCHMAX_SERVER      = self.CONFIG.get('fetchmax', 'server')
 
-        self.AUTORANGE_ENABLE     = self.CONFIG.getint('autorange', 'enable') if self.CONFIG.get('autorange', 'enable') else 0
+        self.AUTORANGE_ENABLE     = self.CONFIG.getint('autorange', 'enable') if self.CONFIG.has_option('autorange', 'enable') else 0
         self.AUTORANGE_HOSTS      = tuple(self.CONFIG.get('autorange', 'hosts').split('|'))
         self.AUTORANGE_HOSTS_TAIL = tuple(x.rpartition('*')[2] for x in self.AUTORANGE_HOSTS)
         self.AUTORANGE_MAXSIZE    = self.CONFIG.getint('autorange', 'maxsize')
