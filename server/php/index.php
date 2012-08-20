@@ -2,9 +2,9 @@
 
 // Contributor:
 //      Phus Lu        <phus.lu@gmail.com>
-//      Phoenix Xie    <hkxseven007@gmail.com>
+//      Phoenix Xie    <hkxseven007@gmail.com
 
-$__version__  = '2.0.1';
+$__version__  = '1.10.0';
 $__password__ = '';
 $__timeout__  = 20;
 
@@ -37,37 +37,27 @@ function decode_request($request) {
 }
 
 function header_function($ch, $header){
-    if (substr($header, 0, 5) == 'HTTP/') {
-        $response_line_items = explode(' ', $header);
-        $GLOBALS['response_headers'] .= 'X-Goa-Status: ' . $response_line_items[1] . "\r\n";
-    } else {
-        $GLOBALS['response_headers'] .= $header;
-    }
+    header($header);
+    $GLOBALS['header_length'] += 1;
     return strlen($header);
 }
 
 function write_function($ch, $body){
-    if (isset($GLOBALS['response_headers'])) {
-        //echo $GLOBALS['response_headers']; exit(0);
-        header('Set-Cookie: ' . base64_encode(gzcompress($GLOBALS['response_headers'])) . "\r\n");
-        unset($GLOBALS['response_headers']);
-    }
     echo $body;
-    $GLOBALS['response_body'] += strlen($body);
+    $GLOBALS['body_length'] += 1;
     return strlen($body);
 }
 
 function post()
 {
     list($headers, $kwargs) = @decode_request($_SERVER['HTTP_COOKIE']);
-
     $method  = $kwargs['method'];
     $url     = $kwargs['url'];
 
 
-    $body = '';
-    if (isset($headers['Content-Length'])) {
-        $body = file_get_contents("php://input");
+    $body = @file_get_contents('php://input');
+    if ($body) {
+        $headers['Content-Length'] = strval(strlen($body));
     }
     $headers['Connection'] = 'close';
 
@@ -114,7 +104,9 @@ function post()
 
     $header_array = array();
     foreach ($headers as $key => $value) {
-        $header_array[] = "$key: $value";
+        if ($key) {
+            $header_array[] = join('-', array_map('ucfirst', explode('-', $key))).': '.$value;
+        }
     }
     $curl_opt[CURLOPT_HTTPHEADER] = $header_array;
 
@@ -123,7 +115,7 @@ function post()
     $ret = curl_exec($ch);
     //$status_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $errno = curl_errno($ch);
-    if ($errno && !isset($GLOBALS['response_body'])) {
+    if ($errno && !isset($GLOBALS['header_length'])) {
         echo $errno . ': ' .curl_error($ch);
     }
     curl_close($ch);
@@ -134,7 +126,7 @@ function get() {
 }
 
 function main() {
-    if ($_SERVER['REQUEST_METHOD'] == 'POST' && $_SERVER['HTTP_COOKIE']) {
+    if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         post();
     } else {
         get();

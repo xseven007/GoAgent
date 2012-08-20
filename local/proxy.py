@@ -3,7 +3,6 @@
 
 # Contributor:
 #      Phus Lu        <phus.lu@gmail.com>
-#      Hewig Xu       <hewigovens@gmail.com>
 #      Phoenix Xie    <hkxseven007@gmail.com>
 
 from __future__ import with_statement
@@ -1187,20 +1186,9 @@ class PAASProxyHandler(GAEProxyHandler):
             except urllib2.URLError as url_error:
                 raise
 
-            try:
-                response_headers, response_kwargs = decode_request(response.headers['Set-Cookie'])
-            except Exception as e:
-                self.send_response(response.code)
-                for keyword, value in response.headers.items():
-                    self.send_header(keyword, value)
-                self.end_headers()
-                self.wfile.write(response.read())
-                return
-            response_status = int(response_kwargs['status'])
-            headers = httplib_normalize_headers(response_headers, skip_headers=['Transfer-Encoding'])
+            headers = httplib_normalize_headers(response.headers.items(), skip_headers=['Transfer-Encoding'])
 
-
-            if response_status == 206:
+            if response.code == 206:
                 self.send_response(200, 'OK')
                 content_length = ''
                 content_range  = ''
@@ -1231,12 +1219,9 @@ class PAASProxyHandler(GAEProxyHandler):
                 logging.info('>>>>>>>>>>>>>>> Range Fetch ended(%r)', host)
                 return
 
-            self.send_response(response_status)
+            self.send_response(response.code)
             for keyword, value in headers:
                 self.send_header(keyword, value)
-            content_encoding = response_kwargs.get('encoding')
-            if content_encoding:
-                self.send_header('Content-Encoding', content_encoding)
             self.end_headers()
 
             while 1:
