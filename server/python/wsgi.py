@@ -98,52 +98,42 @@ def decode_request(request):
     return headers, kwargs
 
 def paas_application(environ, start_response):
-    headers, kwargs = decode_request(environ['HTTP_COOKIE'])
+    try:
+        headers, kwargs = decode_request(environ['HTTP_COOKIE'])
+    except Exception as e:
+        logging.exception("decode_request(environ['HTTP_COOKIE']=%r) failed: %s", environ['HTTP_COOKIE'], e)
 
-    method = kwargs['method']
-    url    = kwargs['url']
+    if __password__ and __password__ != kwargs.get('password'):
+        url = 'https://goa%d%s' % (int(time.time()*100), environ['HTTP_HOST'])
+        response = httplib_request('GET', url, timeout=5)
+        status_line = '%s %s' % (response.status, httplib.responses.get(response.status, 'OK'))
+        start_response(status_line, response.getheaders())
+        yield response.read()
+        raise StopIteration
+
+    method  = kwargs['method']
+    url     = kwargs['url']
+    timeout = Deadline
 
     logging.info('%s "%s %s %s" - -', environ['REMOTE_ADDR'], method, url, 'HTTP/1.1')
 
-    data = environ['wsgi.input'] if int(headers.get('Content-Length',0)) else None
-
     if method != 'CONNECT':
         try:
-            response = httplib_request(method, url, body=data, headers=dict(headers), timeout=16)
-
-            status_line = '%d %s' % (response.status, httplib.responses.get(response.status, 'OK'))
-            headers = wsgiref.headers.Headers(httplib_normalize_headers(response.getheaders(), skip_headers=['Transfer-Encoding']))
-
-            if 'content-encoding' not in headers and headers.get('content-type', '').startswith(('text/', 'application/json', 'application/javascript')):
-                response_headers = [('Set-Cookie', encode_request(headers.items(), status=str(response.status), encoding='gzip'))]
-                start_response('200 OK', response_headers)
-
-                compressobj = zlib.compressobj(zlib.Z_BEST_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS, zlib.DEF_MEM_LEVEL, 0)
-                crc         = zlib.crc32('')
-                size        = 0
-                bufsize     = 8192
-                yield '\037\213\010\000' '\0\0\0\0' '\002\377'
-                while 1:
-                    data = response.read(bufsize)
-                    if not data:
-                        break
-                    crc = zlib.crc32(data, crc)
-                    size += len(data)
-                    zdata = compressobj.compress(data)
-                    if zdata:
-                        yield zdata
-                zdata = compressobj.flush()
-                if zdata:
-                    yield zdata
-                yield struct.pack('<LL', crc&0xFFFFFFFFL, size&0xFFFFFFFFL)
-            else:
-                response_headers = [('Set-Cookie', encode_request(headers.items(), status=str(response.status)))]
-                start_response('200 OK', response_headers)
-                while 1:
-                    data = response.read(bufsize)
-                    if not data:
-                        break
-                    yield zdata
+            headers = dict(headers)
+            headers['Connection'] = 'close'
+            data = environ['wsgi.input'] if int(headers.get('Content-Length',0)) else None
+            response = httplib_request(method, url, body=data, headers=headers, timeout=timeout)
+            response_headers = dict(response.getheaders())
+            response_headers['connection'] = 'close'
+            response_headers.pop('transfer-encoding', '')
+            start_response('%s OK' % response.status, response_headers.items())
+            bufsize = 8192
+            while 1:
+                data = response.read(bufsize)
+                if not data:
+                    response.close()
+                    break
+                yield data
         except httplib.HTTPException as e:
             raise
 
