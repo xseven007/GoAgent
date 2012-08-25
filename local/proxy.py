@@ -7,7 +7,7 @@
 
 from __future__ import with_statement
 
-__version__ = '2.0.1'
+__version__ = '2.0.2'
 __config__  = 'config.cfg'
 
 try:
@@ -1083,6 +1083,9 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             content_encoding = response_kwargs.get('encoding')
             if content_encoding:
                 self.send_header('Content-Encoding', content_encoding)
+            content_length = response_kwargs.get('length')
+            if content_length:
+                self.send_header('Content-Length', content_length)
             self.end_headers()
 
             while 1:
