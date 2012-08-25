@@ -399,7 +399,14 @@ def gae_post_ex(environ, start_response):
                 response.headers['content-length'] = len(response.content)
                 break
             else:
-                headers['Range'] = 'bytes=0-%d' % FetchMaxSize
+                m = re.search(r'=\s*(\d+)-', headers.get('Range') or headers.get('range') or '')
+                if m is None:
+                    headers['Range'] = 'bytes=0-%d' % FetchMaxSize
+                else:
+                    headers.pop('Range', '')
+                    headers.pop('range', '')
+                    start = int(m.group(1))
+                    headers['Range'] = 'bytes=%s-%d' % (start, start+FetchMaxSize)
             deadline = Deadline * 2
         except Exception as e:
             errors.append(str(e))
