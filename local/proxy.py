@@ -888,53 +888,35 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             return self.do_METHOD_Tunnel()
 
     def do_METHOD_Direct(self):
-        scheme, netloc, path, params, query, fragment = urlparse.urlparse(self.path, 'http')
-        try:
-            host, _, port = netloc.rpartition(':')
-            port = int(port)
-        except ValueError:
-            host = netloc
-            port = 80
         try:
             self.log_request()
-            idlecall = None
-            if not common.PROXY_ENABLE:
-                if host in common.HOSTS:
-                    iplist = common.HOSTS[host]
-                    if not iplist:
-                        common.HOSTS[host] = iplist = tuple(x[-1][0] for x in socket.getaddrinfo(host, 80))
-                    conn = MultiplexConnection(iplist, port)
-                    sock = conn.socket
-                    idlecall = conn.close
-                else:
-                    sock = socket.create_connection((host, port))
-                self.headers['Connection'] = 'close'
-                data = '\r\n\r\n%s %s %s\r\n%s\r\n'  % (self.command, urlparse.urlunparse(('', '', path, params, query, '')), self.request_version, ''.join(line for line in self.headers.headers if not line.startswith('Proxy-')))
-            else:
-                sock = socket.create_connection((common.PROXY_HOST, common.PROXY_PORT))
-                if host in common.HOSTS:
-                    host = random.choice(common.HOSTS[host])
-                else:
-                    host = host
-                url = urlparse.urlunparse((scheme, host + ('' if port == 80 else ':%d' % port), path, params, query, ''))
-                self.headers['Host'] = netloc
-                self.headers['Proxy-Connection'] = 'close'
-                if common.PROXY_USERNAME and 'Proxy-Authorization' not in self.headers:
-                    self.headers['Proxy-Authorization'] = 'Basic %s' + base64.b64encode('%s:%s'%(common.PROXY_USERNAME, common.PROXY_PASSWROD))
-                data ='\r\n\r\n%s %s %s\r\n%s\r\n'  % (self.command, url, self.request_version, self.headers)
+
             content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                data += self.rfile.read(content_length)
-            sock.sendall(data)
-            socket_forward(self.connection, sock, idlecall=idlecall)
+            payload = self.rfile.read(content_length) if content_length else None
+            request = urllib2.Request(self.path, data=payload, headers=dict(self.headers))
+            request.get_method = lambda: self.command
+            try:
+                response = urllib2.urlopen(request)
+            except urllib2.HTTPError as http_error:
+                response = http_error
+            except urllib2.URLError as url_error:
+                raise
+
+            headers = httplib_normalize_headers(response.headers.items(), skip_headers=['Transfer-Encoding'])
+
+            self.send_response(response.code)
+            for keyword, value in headers:
+                self.send_header(keyword, value)
+            self.end_headers()
+
+            while 1:
+                data = response.read(8192)
+                if not data:
+                    response.close()
+                    break
+                self.wfile.write(data)
         except Exception:
             logging.exception('GAEProxyHandler.do_GET Error')
-        finally:
-            try:
-                sock.close()
-                del sock
-            except:
-                pass
 
     def rangefetch(self, method, url, headers, payload, current_length, content_length):
         if current_length < content_length:
@@ -1047,7 +1029,8 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             headers = httplib_normalize_headers(response_headers, skip_headers=['Transfer-Encoding'])
 
             if response_status == 206:
-                self.send_response(200, 'OK')
+                request_range = self.headers.get('Range', '')
+                self.send_response(200)
                 content_length = ''
                 content_range  = ''
                 for keyword, value in headers:
