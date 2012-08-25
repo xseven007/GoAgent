@@ -9,7 +9,6 @@ from __future__ import with_statement
 
 __version__ = '2.0.2'
 __config__  = 'config.cfg'
-
 try:
     import gevent, gevent.monkey
     gevent.monkey.patch_all(dns=gevent.version_info[0]>=1)
@@ -129,7 +128,6 @@ class Common(object):
             self.CRLF_ENABLE          = self.CONFIG.getint('crlf', 'enable')
             self.CRLF_DNS             = self.CONFIG.get('crlf', 'dns')
             self.CRLF_SITES           = tuple(self.CONFIG.get('crlf', 'sites').split('|'))
-            self.CRLF_CNAME           = dict(x.split('=') for x in self.CONFIG.get('crlf', 'cname').split('|'))
         else:
             self.CRLF_ENABLE          = 0
 
@@ -391,7 +389,7 @@ def dns_resolve(host, dnsserver='8.8.8.8', dnscache=common.HOSTS, dnslock=thread
 
 _httplib_HTTPConnection_putrequest = httplib.HTTPConnection.putrequest
 def httplib_HTTPConnection_putrequest(self, method, url, skip_host=0, skip_accept_encoding=1):
-    #self._output('\r\n\r\n')
+    self._output('\r\n\r\n')
     return _httplib_HTTPConnection_putrequest(self, method, url, skip_host, skip_accept_encoding)
 httplib.HTTPConnection.putrequest = httplib_HTTPConnection_putrequest
 
@@ -768,13 +766,8 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             return self.do_CONNECT_Direct()
         elif common.CRLF_ENABLE and host.endswith(common.CRLF_SITES):
             if host not in common.HOSTS:
-                try:
-                    cname = common.CRLF_CNAME[itertools.ifilter(host.endswith, common.CRLF_CNAME).next()]
-                except StopIteration:
-                    cname = host
-                logging.info('crlf dns_resolve(host=%r, cname=%r dnsserver=%r)', host, cname, common.CRLF_DNS)
-                iplist = tuple(set(sum((dns_resolve(x, common.CRLF_DNS) if not re.match(r'\d+\.\d+\.\d+\.\d+', host) else (host,) for x in cname.split(',')), ())))
-                common.HOSTS[host] = iplist
+                logging.info('crlf dns_resolve(host=%r, dnsserver=%r)', host, common.CRLF_DNS)
+                common.HOSTS[host] = dns_resolve(host, common.CRLF_DNS)
             return self.do_CONNECT_Direct()
         else:
             return self.do_CONNECT_Tunnel()
@@ -876,13 +869,8 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             return self.do_METHOD_Direct()
         elif common.CRLF_ENABLE and host.endswith(common.CRLF_SITES):
             if host not in common.HOSTS:
-                try:
-                    cname = common.CRLF_CNAME[itertools.ifilter(host.endswith, common.CRLF_CNAME).next()]
-                except StopIteration:
-                    cname = host
-                logging.info('crlf dns_resolve(host=%r, cname=%r dnsserver=%r)', host, cname, common.CRLF_DNS)
-                iplist = tuple(set(sum((dns_resolve(x, common.CRLF_DNS) if re.match(r'\d+\.\d+\.\d+\.\d+', host) else (host,) for x in cname.split(',')), ())))
-                common.HOSTS[host] = iplist
+                logging.info('crlf dns_resolve(host=%r, dnsserver=%r)', host, common.CRLF_DNS)
+                common.HOSTS[host] = dns_resolve(host, common.CRLF_DNS)
             return self.do_METHOD_Direct()
         else:
             return self.do_METHOD_Tunnel()
