@@ -9,6 +9,7 @@ from __future__ import with_statement
 
 __version__ = '2.0.2'
 __config__  = 'config.cfg'
+
 try:
     import gevent, gevent.monkey
     gevent.monkey.patch_all(dns=gevent.version_info[0]>=1)
@@ -394,7 +395,6 @@ def httplib_HTTPConnection_putrequest(self, method, url, skip_host=0, skip_accep
 httplib.HTTPConnection.putrequest = httplib_HTTPConnection_putrequest
 
 def httplib_normalize_headers(response_headers, skip_headers=[]):
-    """return (headers, content_encoding, transfer_encoding)"""
     headers = []
     for keyword, value in response_headers:
         keyword = keyword.title()
@@ -421,7 +421,7 @@ def httplib_normalize_headers(response_headers, skip_headers=[]):
     return headers
 
 class CertUtil(object):
-    '''CertUtil module, based on mitmproxy'''
+    """CertUtil module, based on mitmproxy"""
 
     ca_lock = threading.Lock()
 
@@ -703,7 +703,6 @@ def pack_request(method, url, headers, payload, password=''):
 class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     MessageClass = SimpleMessageClass
     setup_lock = threading.Lock()
-    default_hosts = 'eJxdztsNgDAMQ9GNIvIoSXZjeApSqc3nUVT3ZojakFTR47wSNEhB8qXhorXg+kMjckGtQM9efDKf\n91Km4W+N4M1CldNIYMu+qSVoTm7MsG5E4KPd8apInNUUMo4betRQjg=='
 
     def log_message(self, fmt, *args):
         host, port = self.client_address[:2]
@@ -739,8 +738,8 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                             google_hosts_iplist = [list(dns_resolve(host)) for host in google_hosts]
                         common.GOOGLE_HOSTS = tuple(set(sum(google_hosts_iplist, google_iplist)))
                         if len(common.GOOGLE_HOSTS) == 0:
-                            logging.error('resolve common.GOOGLE_HOSTS domian to iplist return empty! use default iplist')
-                            common.GOOGLE_HOSTS = zlib.decompress(base64.b64decode(self.default_hosts)).split('|')
+                            logging.error('resolve %s domian return empty! please use ip list to replace domain list!', common.GAE_PROFILE)
+                            sys.exit(-1)
                         common.GOOGLE_HOSTS = tuple(x for x in common.GOOGLE_HOSTS if ':' not in x)
                         logging.info('resolve common.GOOGLE_HOSTS domian to iplist=%r', common.GOOGLE_HOSTS)
         if not common.GAE_MULCONN:
@@ -1028,9 +1027,6 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                         content_length = value
                     else:
                         self.send_header(keyword, value)
-                content_encoding = response_kwargs.get('encoding')
-                if content_encoding:
-                    self.send_header('Content-Encoding', content_encoding)
                 start, end, length = map(int, re.search(r'bytes (\d+)-(\d+)/(\d+)', content_range).group(1, 2, 3))
                 if start == 0:
                     self.send_header('Content-Length', str(length))
@@ -1051,12 +1047,6 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_response(response_status)
             for keyword, value in headers:
                 self.send_header(keyword, value)
-            content_encoding = response_kwargs.get('encoding')
-            if content_encoding:
-                self.send_header('Content-Encoding', content_encoding)
-            content_length = response_kwargs.get('length')
-            if content_length:
-                self.send_header('Content-Length', content_length)
             self.end_headers()
 
             while 1:
@@ -1064,6 +1054,7 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                 if not data:
                     response.close()
                     break
+                #logging.debug('response.read(8192) return %r', data)
                 self.wfile.write(data)
         except httplib.HTTPException as e:
             raise
@@ -1260,7 +1251,7 @@ class LocalProxyServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
     allow_reuse_address = True
 
 def try_show_love():
-    '''If you hate this funtion, please go back to gappproxy/wallproxy'''
+    """If you hate this funtion, please go back to gappproxy/wallproxy"""
     if ctypes and os.name == 'nt' and common.LOVE_ENABLE:
         SetConsoleTitleW = ctypes.windll.kernel32.SetConsoleTitleW
         GetConsoleTitleW = ctypes.windll.kernel32.GetConsoleTitleW

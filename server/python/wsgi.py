@@ -7,7 +7,7 @@
 __version__ = '2.0.2'
 __password__ = ''
 
-import sys, os, re, time, struct, zlib, binascii, logging, httplib, urlparse, base64, wsgiref.headers
+import sys, os, re, time, struct, zlib, binascii, logging, httplib, urlparse, base64, cStringIO, wsgiref.headers
 try:
     from google.appengine.api import urlfetch
     from google.appengine.runtime import apiproxy_errors
@@ -22,9 +22,10 @@ try:
 except:
     socket = None
 
-FetchMax = 3
+FetchMax = 2
 FetchMaxSize = 1024*1024
-Deadline = 30
+DeflateMaxSize = 1024*1024*4
+Deadline = 60
 
 def io_copy(source, dest):
     try:
@@ -268,12 +269,10 @@ def gae_post(environ, start_response):
             errors.append('DeadlineExceededError %s(deadline=%s)' % (e, deadline))
             logging.error('DeadlineExceededError(deadline=%s, url=%r)', deadline, url)
             time.sleep(1)
-            deadline = Deadline * 2
         except urlfetch.DownloadError as e:
             errors.append('DownloadError %s(deadline=%s)' % (e, deadline))
             logging.error('DownloadError(deadline=%s, url=%r)', deadline, url)
             time.sleep(1)
-            deadline = Deadline * 2
         except urlfetch.InvalidURLError as e:
             return send_notify(start_response, method, url, 501, 'Invalid URL: %s' % e)
         except urlfetch.ResponseTooLargeError as e:
@@ -287,11 +286,8 @@ def gae_post(environ, start_response):
                 break
             else:
                 headers['Range'] = 'bytes=0-%d' % FetchMaxSize
-            deadline = Deadline * 2
         except Exception as e:
             errors.append('Exception %s(deadline=%s)' % (e, deadline))
-            if i==0 and method=='GET':
-                deadline = Deadline * 2
     else:
         return send_notify(start_response, method, url, 500, 'Python Server: Urlfetch error: %s' % errors)
 
@@ -416,17 +412,23 @@ def gae_post_ex(environ, start_response):
         start_response('500 Internal Server Error', [('Content-type', 'text/html')])
         return [gae_error_html(errno='502', error=('Python Urlfetch Error: ' + str(method)), description=str(errors))]
 
-    if 'content-encoding' not in response.headers and response.headers.get('content-type', '').startswith(('text/', 'application/json', 'application/javascript')):
+    #logging.debug('url=%r response.status_code=%r response.headers=%r response.content[:1024]=%r', url, response.status_code, dict(response.headers), response.content[:1024])
+
+    if len(response.content) < DeflateMaxSize and 'content-encoding' not in response.headers and response.headers.get('content-type', '').startswith(('text/', 'application/json', 'application/javascript')):
         compressobj = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -zlib.MAX_WBITS, zlib.DEF_MEM_LEVEL, 0)
-        response_headers = [('Set-Cookie', encode_request(response.headers, status=str(response.status_code), encoding='gzip'))]
-        start_response('200 OK', response_headers)
-        return ['\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff', compressobj.compress(response.content), compressobj.flush(), struct.pack('<LL', zlib.crc32(response.content)&0xFFFFFFFFL, len(response.content)&0xFFFFFFFFL)]
+        zdataio = cStringIO.StringIO()
+        zdataio.write('\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff')
+        zdataio.write(compressobj.compress(response.content))
+        zdataio.write(compressobj.flush())
+        zdataio.write(struct.pack('<LL', zlib.crc32(response.content)&0xFFFFFFFFL, len(response.content)&0xFFFFFFFFL))
+        zdata = zdataio.getvalue()
+        response.headers['Content-Length'] = str(len(zdata))
+        response.headers['Content-Encoding'] = 'gzip'
+        start_response('200 OK', [('Set-Cookie', encode_request(response.headers, status=str(response.status_code)))])
+        return [zdata]
     else:
-        if 'content-length' not in response.headers:
-            response_headers = [('Set-Cookie', encode_request(response.headers, status=str(response.status_code), length=str(len(response.content))))]
-        else:
-            response_headers = [('Set-Cookie', encode_request(response.headers, status=str(response.status_code)))]
-        start_response('200 OK', response_headers)
+        response.headers['Content-Length'] = str(len(response.content))
+        start_response('200 OK', [('Set-Cookie', encode_request(response.headers, status=str(response.status_code)))])
         return [response.content]
 
 def gae_get(environ, start_response):
