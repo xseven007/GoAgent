@@ -7,7 +7,7 @@
 
 from __future__ import with_statement
 
-__version__ = '2.0.2'
+__version__ = '2.0.3'
 __config__  = 'config.cfg'
 
 try:
@@ -61,7 +61,7 @@ class Common(object):
     """global config object"""
 
     def __init__(self):
-        """load config from config.cfg"""
+        """load config from proxy.ini"""
         ConfigParser.RawConfigParser.OPTCRE = re.compile(r'(?P<option>[^=\s][^=]*)\s*(?P<vi>[=])\s*(?P<value>.*)$')
         self.CONFIG = ConfigParser.ConfigParser()
         self.CONFIG.read(os.path.join(os.path.dirname(__file__), __config__))
@@ -271,7 +271,7 @@ class MultiplexConnection(object):
         for sock in self._sockets:
             try:
                 sock.close()
-            except:
+            except socket.error:
                 pass
         del self._sockets
 
@@ -489,7 +489,7 @@ class CertUtil(object):
         cert.set_version(2)
         try:
             cert.set_serial_number(int(hashlib.md5(commonname).hexdigest(), 16))
-        except:
+        except OpenSSL.SSL.Error:
             cert.set_serial_number(int(time.time()*1000))
         cert.gmtime_adj_notBefore(0)
         cert.gmtime_adj_notAfter(60 * 60 * 24 * 3652)
