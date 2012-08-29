@@ -61,7 +61,7 @@ class Common(object):
     """global config object"""
 
     def __init__(self):
-        """load config from proxy.ini"""
+        """load config from config.cfg"""
         ConfigParser.RawConfigParser.OPTCRE = re.compile(r'(?P<option>[^=\s][^=]*)\s*(?P<vi>[=])\s*(?P<value>.*)$')
         self.CONFIG = ConfigParser.ConfigParser()
         self.CONFIG.read(os.path.join(os.path.dirname(__file__), __config__))
