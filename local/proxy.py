@@ -7,7 +7,7 @@
 
 from __future__ import with_statement
 
-__version__ = '2.0.3'
+__version__ = '2.0.5'
 __config__  = 'config.cfg'
 
 try:
@@ -61,7 +61,7 @@ class Common(object):
     """global config object"""
 
     def __init__(self):
-        """load config from config.cfg"""
+        """load config from proxy.ini"""
         ConfigParser.RawConfigParser.OPTCRE = re.compile(r'(?P<option>[^=\s][^=]*)\s*(?P<vi>[=])\s*(?P<value>.*)$')
         self.CONFIG = ConfigParser.ConfigParser()
         self.CONFIG.read(os.path.join(os.path.dirname(__file__), __config__))
@@ -477,10 +477,15 @@ class CertUtil(object):
         subj.countryName = 'CN'
         subj.stateOrProvinceName = 'Internet'
         subj.localityName = 'Cernet'
-        subj.organizationName = commonname
         subj.organizationalUnitName = 'GoAgent Branch'
-        subj.commonName = commonname
-        sans = [commonname] + [x for x in sans if x != commonname]
+        if commonname[0] == '.':
+            subj.commonName = '*' + commonname
+            subj.organizationName = '*' + commonname
+            sans = ['*'+commonname] + [x for x in sans if x != '*'+commonname]
+        else:
+            subj.commonName = commonname
+            subj.organizationName = commonname
+            sans = [commonname] + [x for x in sans if x != commonname]
         req.add_extensions([OpenSSL.crypto.X509Extension(b'subjectAltName', True, ', '.join('DNS: %s' % x for x in sans))])
         req.set_pubkey(pkey)
         req.sign(pkey, 'sha1')
@@ -511,6 +516,8 @@ class CertUtil(object):
 
     @staticmethod
     def get_cert(commonname, certdir='certs', ca_keyfile='CA.key', ca_certfile='CA.crt', sans = []):
+        if len(commonname) >= 32:
+            commonname = re.sub(r'^[^\.]+', '', commonname)
         keyfile  = os.path.join(certdir, commonname + '.key')
         certfile = os.path.join(certdir, commonname + '.crt')
         if os.path.exists(certfile):
@@ -690,12 +697,12 @@ def decode_request(request):
             headers.append((keyword.title(), value.strip()))
     return headers, kwargs
 
-def pack_request(method, url, headers, payload, password=''):
+def pack_request(method, url, headers, payload, fetchhost, password=''):
     content_length = int(headers.get('Content-Length',0))
     request_kwargs = {'method':method, 'url':url}
     if password:
         request_kwargs['password'] = password
-    request_headers = {'Cookie':encode_request(headers, **request_kwargs), 'Content-Length':str(content_length)}
+    request_headers = {'Host':fetchhost, 'Cookie':encode_request(headers, **request_kwargs), 'Content-Length':str(content_length)}
     if not isinstance(payload, str):
         payload = payload.read(content_length)
     return 'POST', request_headers, payload
@@ -908,7 +915,7 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     def rangefetch(self, method, url, headers, payload, current_length, content_length):
         if current_length < content_length:
             headers['Range'] = 'bytes=%d-%d' % (current_length, min(current_length+common.AUTORANGE_MAXSIZE-1, content_length-1))
-            request_method, request_headers, payload = pack_request(method, url, headers, payload, common.GAE_PASSWORD)
+            request_method, request_headers, payload = pack_request(method, url, headers, payload, common.GAE_FETCHHOST, common.GAE_PASSWORD)
             request  = urllib2.Request(common.GAE_FETCHSERVER, data=payload, headers=request_headers)
             request.get_method = lambda: request_method
             try:
@@ -977,7 +984,7 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
                     pass
 
         try:
-            method, headers, payload = pack_request(self.command, self.path, self.headers, self.rfile, common.GAE_PASSWORD)
+            method, headers, payload = pack_request(self.command, self.path, self.headers, self.rfile, common.GAE_FETCHHOST, common.GAE_PASSWORD)
             request  = urllib2.Request(common.GAE_FETCHSERVER, data=payload, headers=headers)
             request.get_method = lambda: method
 
@@ -1016,20 +1023,27 @@ class GAEProxyHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             headers = httplib_normalize_headers(response_headers, skip_headers=['Transfer-Encoding'])
 
             if response_status == 206:
-                request_range = self.headers.get('Range', '')
-                self.send_response(200)
-                content_length = ''
-                content_range  = ''
+                response_headers_towrite = []
                 for keyword, value in headers:
                     if keyword == 'Content-Range':
                         content_range = value
                     elif keyword == 'Content-Length':
                         content_length = value
                     else:
-                        self.send_header(keyword, value)
+                        response_headers_towrite.append((keyword, value))
                 start, end, length = map(int, re.search(r'bytes (\d+)-(\d+)/(\d+)', content_range).group(1, 2, 3))
                 if start == 0:
+                    self.send_response(200)
                     self.send_header('Content-Length', str(length))
+                else:
+                    self.send_response(206)
+                    self.send_header('Content-Range', content_range)
+                    self.send_header('Content-Length', content_length)
+                    #self.send_header('Content-Range', 'bytes %s-%s/%s' % (start, length-1, length))
+                    #self.send_header('Content-Length', str(length-start))
+
+                for keyword, value in response_headers_towrite:
+                    self.send_header(keyword, value)
                 self.end_headers()
 
                 while 1:
@@ -1107,7 +1121,7 @@ class PAASProxyHandler(GAEProxyHandler):
                     pass
 
         try:
-            method, headers, payload = pack_request(self.command, self.path, self.headers, self.rfile, common.PAAS_PASSWORD)
+            method, headers, payload = pack_request(self.command, self.path, self.headers, self.rfile, common.PAAS_FETCHHOST, common.PAAS_PASSWORD)
             request  = urllib2.Request(common.PAAS_FETCHSERVER, data=payload, headers=headers)
             request.get_method = lambda: method
 
