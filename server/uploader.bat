@@ -16,7 +16,7 @@ set uploaddir=python
     "..\local\proxy.exe"
 ) && (
     echo.
-    echo 上传成功，请编辑config.cfg把你的appid填进去，谢谢。请按任意键退出程序。
+    echo 上传成功，请编辑proxy.ini把你的appid填进去，谢谢。请按任意键退出程序。
 )
 
 @pause>NUL
