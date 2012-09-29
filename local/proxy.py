@@ -1092,6 +1092,8 @@ def pre_start():
         sys.exit(-1)
     if ctypes and os.name == 'nt':
         ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition')
+    if not common.LISTEN_VISIBLE:
+        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)    
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
