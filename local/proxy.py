@@ -627,7 +627,7 @@ class RangeFetch(object):
     threads   = 1
     retry     = 8
 
-    def __init__(self, sock, response_code, response_headers, response_rfile, method, url, headers, payload, fetchserver, password, rangesize=0, bufsize=0, waitsize=0, threads=0):
+    def __init__(self, sock, response_code, response_headers, response_rfile, method, url, headers, payload, fetchservers, password, rangesize=0, bufsize=0, waitsize=0, threads=0):
         self.response_code = response_code
         self.response_headers = response_headers
         self.response_rfile = response_rfile
@@ -635,7 +635,7 @@ class RangeFetch(object):
         self.url = url
         self.headers = headers
         self.payload = payload
-        self.fetchserver = fetchserver
+        self.fetchservers = fetchservers
         self.password = password
 
         if rangesize:
@@ -708,8 +708,9 @@ class RangeFetch(object):
             headers['Range'] = 'bytes=%d-%d' % (start, end)
             headers['Connection'] = 'close'
             for i in xrange(self.retry):
-                request_method, request_headers, request_payload = pack_request(self.method, self.url, headers, self.payload, self.fetchserver, password=self.password)
-                response_code, response_headers, response_rfile = http.request(request_method, self.fetchserver, request_payload, request_headers)
+                fetchserver = random.choice(self.fetchservers)
+                request_method, request_headers, request_payload = pack_request(self.method, self.url, headers, self.payload, fetchserver, password=self.password)
+                response_code, response_headers, response_rfile = http.request(request_method, fetchserver, request_payload, request_headers)
                 if 'Set-Cookie' not in response_headers:
                     logging.error('Range Fetch %r return %s', self.url, response_code)
                     time.sleep(5)
@@ -761,7 +762,11 @@ def gaeproxy_handler(sock, address, ls={'setuplock':LockType()}):
 
     if 'setup' not in ls:
         http.dns.update(common.HOSTS)
-        if not common.PROXY_ENABLE and common.GAE_PROFILE != 'google_ipv6':
+        fetchhosts = ['%s.appspot.com' % x for x in common.GAE_APPIDS]
+        if common.GAE_PROFILE == 'google_ipv6':
+            for fetchhost in fetchhosts:
+                http.dns[fetchhost] = http.dns.default_factory(common.GOOGLE_HOSTS)
+        elif not common.PROXY_ENABLE:
             logging.info('resolve common.GOOGLE_HOSTS domian=%r to iplist', common.GOOGLE_HOSTS)
             if any(not re.match(r'\d+\.\d+\.\d+\.\d+', x) for x in common.GOOGLE_HOSTS):
                 with ls['setuplock']:
@@ -773,7 +778,8 @@ def gaeproxy_handler(sock, address, ls={'setuplock':LockType()}):
                         if len(common.GOOGLE_HOSTS) == 0:
                             logging.error('resolve %s domian return empty! please use ip list to replace domain list!', common.GAE_PROFILE)
                             sys.exit(-1)
-            http.dns[urlparse.urlparse(common.GAE_FETCHSERVER).netloc] = common.GOOGLE_HOSTS
+            for fetchhost in fetchhosts:
+                http.dns[fetchhost] = common.GOOGLE_HOSTS
             logging.info('resolve common.GOOGLE_HOSTS domian to iplist=%r', common.GOOGLE_HOSTS)
         ls['setup'] = True
 
@@ -923,7 +929,8 @@ def gaeproxy_handler(sock, address, ls={'setuplock':LockType()}):
             logging.info('%s:%s "%s %s HTTP/1.1" %s -' % (remote_addr, remote_port, method, path, code))
 
             if code == 206:
-                rangefetch = RangeFetch(sock, code, response_headers, response_rfile, method, path, headers, request_payload, common.GAE_FETCHSERVER, common.GAE_PASSWORD, rangesize=common.AUTORANGE_MAXSIZE, bufsize=common.AUTORANGE_BUFSIZE, waitsize=common.AUTORANGE_WAITSIZE, threads=common.AUTORANGE_THREADS)
+                fetchservers = ['http://%s.appspot.com%s' % (x, common.GAE_PATH) for x in common.GAE_APPIDS]
+                rangefetch = RangeFetch(sock, code, response_headers, response_rfile, method, path, headers, request_payload, fetchservers, common.GAE_PASSWORD, rangesize=common.AUTORANGE_MAXSIZE, bufsize=common.AUTORANGE_BUFSIZE, waitsize=common.AUTORANGE_WAITSIZE, threads=common.AUTORANGE_THREADS)
                 return rangefetch.fetch()
             http.copy_response(code, response_headers, write=wfile.write)
             http.copy_body(response_rfile, response_headers, write=wfile.write)
@@ -1092,8 +1099,8 @@ def pre_start():
         sys.exit(-1)
     if ctypes and os.name == 'nt':
         ctypes.windll.kernel32.SetConsoleTitleW(u'GoAgent %s' % 'Xseven Special edition')
-    if not common.LISTEN_VISIBLE:
-        ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)    
+        if not common.LISTEN_VISIBLE:
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
 
 def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
