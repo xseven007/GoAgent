@@ -7,17 +7,17 @@
 
 from __future__ import with_statement
 
-__version__ = '2.0.9'
+__version__ = '2.0.10'
 __config__  = 'config.cfg'
 
 import sys
 import os
 import gevent, gevent.monkey, gevent.server, gevent.queue, gevent.pool
-gevent.monkey.patch_all(dns=gevent.version_info[0]>=1)
 try:
     from gevent.lock import Semaphore as LockType
 except ImportError:
     from gevent.coros import Semaphore as LockType
+gevent.monkey.patch_all(dns=gevent.version_info[0]>=1)
 
 import collections
 import errno
@@ -690,9 +690,10 @@ class RangeFetch(object):
                     self._sock.sendall(data)
             logging.info('>>>>>>>>>>>>>>> Range Fetch ended(%r)', urlparse.urlparse(self.url).netloc)
         except socket.error as e:
-            logging.exception('Range Fetch socket.error: %s', e)
             self._stopped = True
-            raise
+            if e[0] not in (10053, errno.EPIPE):
+                logging.exception('Range Fetch socket.error: %s', e)
+                raise
 
     def _poolfetch(self, size, queues, end, length, rangesize):
         pool = gevent.pool.Pool(size)
@@ -712,7 +713,7 @@ class RangeFetch(object):
                 request_method, request_headers, request_payload = pack_request(self.method, self.url, headers, self.payload, fetchserver, password=self.password)
                 response_code, response_headers, response_rfile = http.request(request_method, fetchserver, request_payload, request_headers)
                 if 'Set-Cookie' not in response_headers:
-                    logging.error('Range Fetch %r return %s', self.url, response_code)
+                    logging.warning('Range Fetch %r %s return %s', self.url, headers['Range'], response_code)
                     time.sleep(5)
                     continue
                 response_headers, response_kwargs = decode_request(response_headers['Set-Cookie'])
@@ -720,7 +721,7 @@ class RangeFetch(object):
                 if 200 <= response_code < 300:
                     break
                 elif 300 <= response_code < 400:
-                    selfurl = response_headers['Location']
+                    self.url = response_headers['Location']
                     logging.info('Range Fetch Redirect(%r)', self.url)
                     response_rfile.close()
                     continue
@@ -988,7 +989,9 @@ def paasproxy_handler(sock, address, ls={'setuplock':LockType()}):
             sock = ssl.wrap_socket(__realsock, certfile=certfile, keyfile=keyfile, server_side=True)
         except Exception as e:
             logging.exception('ssl.wrap_socket(__realsock=%r) failed: %s', __realsock, e)
-            sock = ssl.wrap_socket(__realsock, certfile=certfile, keyfile=keyfile, server_side=True, ssl_version=ssl.PROTOCOL_TLSv1)
+            __realrfile.close()
+            __realsock.close()
+            return
         rfile = sock.makefile('rb', 8192)
         try:
             method, path, version, headers = http.parse_request(rfile)
@@ -1087,7 +1090,7 @@ def pacserver_handler(sock, address):
         return
     with open(filename, 'rb') as fp:
         data = fp.read()
-        wfile.write('HTTP/1.1 200\r\nContent-Type: text/plain\r\nConnection: close\r\n')
+        wfile.write('HTTP/1.1 200\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n')
         logging.info('%s:%s "%s %s HTTP/1.1" 200 -' % (remote_addr, remote_port, method, path))
         wfile.write(data)
         wfile.close()
