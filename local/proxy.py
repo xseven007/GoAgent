@@ -112,6 +112,7 @@ import logging
 import ConfigParser
 import SocketServer
 import thread
+import httplib
 import urllib2
 import threading
 try:
@@ -423,7 +424,7 @@ class Http(object):
             headers[keyword] = value
         return method, path, version, headers
 
-    def _request(self, sock, method, path, protocol_version, headers, payload, bufsize=8192, crlf=None):
+    def _request(self, sock, method, path, protocol_version, headers, payload, bufsize=8192, crlf=None, return_sock=None):
         skip_headers = self.skip_headers
 
         request_data = '\r\n' * (self.crlf if crlf is None else crlf)
@@ -444,6 +445,9 @@ class Http(object):
                 if not data:
                     break
                 wfile.write(data)
+
+        if return_sock:
+            return sock
 
         rfile = sock.makefile('rb', -1)
 
@@ -466,7 +470,7 @@ class Http(object):
             headers[keyword] = value.strip()
         return code, headers, rfile
 
-    def request(self, method, url, payload=None, headers={}, fullurl=False, bufsize=8192, crlf=None):
+    def request(self, method, url, payload=None, headers={}, fullurl=False, bufsize=8192, crlf=None, return_sock=None):
         scheme, netloc, path, params, query, fragment = urlparse.urlparse(url)
         if not re.search(r':\d+$', netloc):
             host = netloc
@@ -490,8 +494,7 @@ class Http(object):
                 if sock:
                     if scheme == 'https':
                         sock = ssl.wrap_socket(sock)
-                    code, headers, rfile = self._request(sock, method, path, self.protocol_version, headers, payload, bufsize=bufsize, crlf=crlf)
-                    return code, headers, rfile
+                    return self._request(sock, method, path, self.protocol_version, headers, payload, bufsize=bufsize, crlf=crlf, return_sock=return_sock)
             except Exception as e:
                 logging.debug('Http.request "%s %s" failed:%s', method, url, e)
                 if sock:
@@ -532,6 +535,8 @@ class Http(object):
                     break
                 if line == '\r\n':
                     continue
+                if ';' in line:
+                    line, _ = line.split(';', 1)
                 count = int(line , 16)
                 if count == 0:
                     break
@@ -552,7 +557,7 @@ class Common(object):
     """Global Config Object"""
 
     def __init__(self):
-        """load config from config.cfg"""
+        """load config from config,cfg"""
         ConfigParser.RawConfigParser.OPTCRE = re.compile(r'(?P<option>[^=\s][^=]*)\s*(?P<vi>[=])\s*(?P<value>.*)$')
         self.CONFIG = ConfigParser.ConfigParser()
         self.CONFIG.read(os.path.join(os.path.dirname(__file__), __config__))
@@ -862,32 +867,33 @@ def gaeproxy_handler(sock, address, hls={'setuplock':gevent.coros.Semaphore()}):
             logging.info('resolve common.GOOGLE_HOSTS domian=%r to iplist', common.GOOGLE_HOSTS)
             if common.GAE_PROFILE == 'google_cn':
                 with hls['setuplock']:
-                    hosts = ('ditu.google.cn', 'www.google.cn', 'www.g.cn', 'ditu.g.cn')
-                    iplist = []
-                    for host in hosts:
-                        try:
-                            iplist += socket.gethostbyname_ex(host)[-1]
-                        except socket.error as e:
-                            logging.error('socket.gethostbyname_ex(host=%r) failed:%s', host, e)
-                    prefix = re.sub(r'\d+\.\d+$', '', common.GOOGLE_HOSTS[0])
-                    iplist = [x for x in iplist if x.startswith(prefix) and re.match(r'\d+\.\d+\.\d+\.\d+', x)]
-                    if iplist:
-                        common.GOOGLE_HOSTS = set(iplist)
-                    else:
-                        # seems google_cn is down, should switch to google_hk?
-                        need_switch = False
-                        for host in random.sample(common.GOOGLE_HOSTS, min(3, len(common.GOOGLE_HOSTS))):
+                    if common.GAE_PROFILE == 'google_cn':
+                        hosts = ('ditu.google.cn', 'www.google.cn', 'www.g.cn', 'ditu.g.cn')
+                        iplist = []
+                        for host in hosts:
                             try:
-                                socket.create_connection((host, 80), timeout=2).close()
-                            except socket.error:
-                                need_switch = True
-                                break
-                        if need_switch:
-                            common.GAE_PROFILE = 'google_hk'
-                            common.GOOGLE_MODE = 'https'
-                            common.GAE_FETCHSERVER = '%s://%s.appspot.com%s?' % (common.GOOGLE_MODE, common.GAE_APPIDS[0], common.GAE_PATH)
-                            common.GOOGLE_HOSTS = [x for x in common.CONFIG.get(common.GAE_PROFILE, 'hosts').split('|') if x]
-                            common.GOOGLE_WITHGAE = common.CONFIG.get('google_hk', 'withgae').split('|')
+                                iplist += socket.gethostbyname_ex(host)[-1]
+                            except socket.error as e:
+                                logging.error('socket.gethostbyname_ex(host=%r) failed:%s', host, e)
+                        prefix = re.sub(r'\d+\.\d+$', '', common.GOOGLE_HOSTS[0])
+                        iplist = [x for x in iplist if x.startswith(prefix) and re.match(r'\d+\.\d+\.\d+\.\d+', x)]
+                        if iplist:
+                            common.GOOGLE_HOSTS = set(iplist)
+                        else:
+                            # seems google_cn is down, should switch to google_hk?
+                            need_switch = False
+                            for host in random.sample(list(common.GOOGLE_HOSTS), min(3, len(common.GOOGLE_HOSTS))):
+                                try:
+                                    socket.create_connection((host, 80), timeout=2).close()
+                                except socket.error:
+                                    need_switch = True
+                                    break
+                            if need_switch:
+                                common.GAE_PROFILE = 'google_hk'
+                                common.GOOGLE_MODE = 'https'
+                                common.GAE_FETCHSERVER = '%s://%s.appspot.com%s?' % (common.GOOGLE_MODE, common.GAE_APPIDS[0], common.GAE_PATH)
+                                common.GOOGLE_HOSTS = [x for x in common.CONFIG.get(common.GAE_PROFILE, 'hosts').split('|') if x]
+                                common.GOOGLE_WITHGAE = common.CONFIG.get('google_hk', 'withgae').split('|')
             if any(not re.match(r'\d+\.\d+\.\d+\.\d+', x) for x in common.GOOGLE_HOSTS):
                 with hls['setuplock']:
                     if any(not re.match(r'\d+\.\d+\.\d+\.\d+', x) for x in common.GOOGLE_HOSTS):
@@ -1090,21 +1096,34 @@ def paas_urlfetch(method, url, headers, payload, fetchserver, **kwargs):
     metadata = 'G-Method:%s\nG-Url:%s\n%s\n%s\n' % (method, url, '\n'.join('G-%s:%s'%(k,v) for k,v in kwargs.iteritems() if v), '\n'.join('%s:%s'%(k,v) for k,v in headers.iteritems() if k not in skip_headers))
     metadata = zlib.compress(metadata)[2:-4]
     app_payload = '%s%s%s' % (struct.pack('!h', len(metadata)), metadata, payload)
-    app_code, app_headers, rfile = http.request('POST', fetchserver, app_payload, {'Content-Length':len(app_payload)}, crlf=0)
-    if app_code != 200 or 'Status' not in app_headers:
-        return app_code, app_code, app_headers, rfile
-    data = app_headers['Status']
-    data = zlib.decompress(base64.b64decode(data), -15)
-    headers = dict(x.split(':', 1) for x in data.splitlines())
-    if 'Transfer-Encoding' in app_headers:
-        headers['Transfer-Encoding'] = app_headers['Transfer-Encoding']
+    sock = http.request('POST', fetchserver, app_payload, {'Content-Length':len(app_payload)}, crlf=0, return_sock=True)
+
+    response = httplib.HTTPResponse(sock, buffering=True)
+    response.begin()
+    app_code = response.status
+    app_headers = response.getheaders()
+    if app_code != 200:
+        return app_code, app_code, response.getheaders(), response
+
+    data = response.read(4)
+    if len(data) < 4:
+        return app_code, 502, headers, cStringIO.StringIO('connection aborted. too short leadtype data=%r' % data)
+    code, headers_length = struct.unpack('!hh', data)
+    data = response.read(headers_length)
+    if len(data) < headers_length:
+        return app_code, 502, headers, cStringIO.StringIO('connection aborted. too short headers data=%r' % data)
+    headers = dict(x.split(':', 1) for x in zlib.decompress(data, -15).splitlines())
+
+    if 'transfer-encoding' in app_headers:
+        headers['Transfer-Encoding'] = app_headers['transfer-encoding']
         headers.pop('Content-Length', None)
-    if 'Connection' in app_headers:
-        headers['Connection'] = app_headers['Connection']
-    if 'Set-Cookie' in app_headers:
-        headers['Set-Cookie'] = app_headers['Set-Cookie']
-    code = int(headers.pop('G-Code'))
-    return app_code, code, headers, rfile
+    if 'connection' in app_headers:
+        headers['Connection'] = app_headers['connection']
+    if 'set-cookie' in app_headers:
+        headers['Set-Cookie'] = app_headers['set-cookie']
+
+    headers.pop('Transfer-Encoding', None)
+    return app_code, code, headers, response
 
 def php_urlfetch(method, url, headers, payload, fetchserver, **kwargs):
     # deflate = lambda x:zlib.compress(x)[2:-4]
