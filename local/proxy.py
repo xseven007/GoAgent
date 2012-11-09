@@ -314,7 +314,7 @@ class Http(object):
     MessageClass = dict
     protocol_version = 'HTTP/1.1'
     skip_headers = frozenset(['Vary', 'Via', 'X-Forwarded-For', 'Proxy-Authorization', 'Proxy-Connection', 'Upgrade', 'X-Chrome-Variations'])
-    dns_blacklist = set(['203.98.7.65','159.106.121.75','159.24.3.173','46.82.174.68','78.16.49.15','59.24.3.173','243.185.187.39','243.185.187.30','8.7.198.45','37.61.54.158','93.46.8.89',])
+    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13', '59.24.3.173'])
 
     def __init__(self, min_window=4, max_window=64, max_retry=2, max_timeout=30, proxy_uri=''):
         self.min_window = min_window
@@ -350,7 +350,7 @@ class Http(object):
                 sock.sendto(data, (dnsserver, 53))
                 for i in xrange(max_wait):
                     data = sock.recv(512)
-                    iplist = ['.'.join(str(ord(x)) for x in s) for s in re.findall('\xC0.\x00\x01\x00\x01.{6}(.{4})', data) if all(ord(x)<=255 for x in s)]
+                    iplist = ['.'.join(str(ord(x)) for x in s) for s in re.findall('\xc0.\x00\x01\x00\x01.{6}(.{4})', data) if all(ord(x)<=255 for x in s)]
                     iplist = [x for x in iplist if x not in blacklist]
                     if iplist:
                         return iplist
@@ -472,6 +472,8 @@ class Http(object):
         ssl_sock = None
         if poolkey in _pool:
             while _pool[poolkey]:
+                if len(_pool[poolkey]) < 5 and random.random() < 0.5:
+                    break
                 ssl_sock = _pool[poolkey].pop()
                 if time.time() - ssl_sock.mtime > 60:
                     sock = ssl_sock.sock
@@ -1151,7 +1153,7 @@ def gaeproxy_handler(sock, address, hls={'setuplock':gevent.coros.Semaphore()}):
                                 logging.info('resolve remote domain=%r from dnsserver=%r', domain, dnsserver)
                                 try:
                                     iplist = Http.dns_remote_resolve(domain, dnsserver, timeout=3)
-                                    if iplist:
+                                    if all(x not in Http.dns_blacklist for x in iplist):
                                         google_ipmap[domain] = iplist
                                         logging.info('resolve remote domain=%r to iplist=%s', domain, google_ipmap[domain])
                                 except socket.error as e:
@@ -1686,7 +1688,7 @@ class DNSServer(gevent.server.DatagramServer):
     max_retry = 2
     max_cache_size = 2000
     timeout   = 3
-    dns_blacklist = set(['203.98.7.65','159.106.121.75','159.24.3.173','46.82.174.68','78.16.49.15','59.24.3.173','243.185.187.39','243.185.187.30','8.7.198.45','37.61.54.158','93.46.8.89',])
+    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13', '59.24.3.173'])
 
     def __init__(self, *args, **kwargs):
         gevent.server.DatagramServer.__init__(self, *args, **kwargs)
