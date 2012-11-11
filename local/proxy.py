@@ -5,7 +5,7 @@
 #      Phus Lu        <phus.lu@gmail.com>
 #      Phoenix Xie    <hkxseven007@gmail.com>
 
-__version__ = '2.1.8'
+__version__ = '2.1.9'
 __config__  = 'config.cfg'
 __bufsize__ = 1024*1024
 
@@ -314,15 +314,16 @@ class Http(object):
     MessageClass = dict
     protocol_version = 'HTTP/1.1'
     skip_headers = frozenset(['Vary', 'Via', 'X-Forwarded-For', 'Proxy-Authorization', 'Proxy-Connection', 'Upgrade', 'X-Chrome-Variations'])
-    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13', '59.24.3.173'])
+    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13'])
 
     def __init__(self, min_window=4, max_window=64, max_retry=2, max_timeout=30, proxy_uri=''):
         self.min_window = min_window
         self.max_window = max_window
         self.max_retry = max_retry
         self.max_timeout = max_timeout
-        self.window = min_window
+        self.window = 10
         self.window_ack = 0
+        self.window_ipr = collections.defaultdict(int)
         self.timeout = max_timeout // 2
         self.dns = collections.defaultdict(set)
         self.crlf = 0
@@ -334,6 +335,7 @@ class Http(object):
                 self.proxy = (None, None) + (re.match('(.+):(\d+)', netloc).group(1,2))
         else:
             self.proxy = ''
+        #gevent.spawn(self.__update_window_ipr)
 
     @staticmethod
     def dns_remote_resolve(qname, dnsserver, timeout=None, blacklist=set(), max_retry=2, max_wait=2):
@@ -385,6 +387,7 @@ class Http(object):
                     sock.settimeout(timeout)
                 sock.connect((ip, port))
             except socket.error as e:
+                self.window_ipr[ip] //= 2
                 if sock:
                     sock.close()
                     sock = None
@@ -402,7 +405,7 @@ class Http(object):
         if poolkey in _pool:
             while _pool[poolkey]:
                 sock, mtime = _pool[poolkey].pop()
-                if time.time() - mtime > 60:
+                if time.time() - mtime > 20:
                     sock.close()
                 else:
                     break
@@ -412,7 +415,7 @@ class Http(object):
         iplist = self.dns_resolve(host)
         for i in xrange(self.max_retry):
             window = self.window
-            ips = random.sample(iplist, min(len(iplist), int(window)+i))
+            ips = sorted(iplist, key=lambda x:(self.window_ipr[x], random.random()), reverse=True)[:min(len(iplist), int(window)+i)]
             queue = gevent.queue.Queue()
             for ip in ips:
                 gevent.spawn(_create_connection, (ip, port), timeout, queue)
@@ -426,6 +429,9 @@ class Http(object):
                             self.window_ack = 0
                             self.window = window - 1
                             logging.info('Http.create_connection to %s, port=%r successed, switch window=%r', ips, port, self.window)
+                    self.window_ipr[sock.getpeername()[0]] += window
+                    if self.window_ipr[sock.getpeername()[0]] > 4000:
+                        self.window_ipr.clear()
                     return sock
             else:
                 logging.warning('Http.create_connection to %s, port=%r return None, try again.', ips, port)
@@ -453,6 +459,7 @@ class Http(object):
                 ssl_sock.sock = sock
                 ssl_sock.mtime = time.time()
             except socket.error as e:
+                self.window_ipr[ip] //= 2
                 if ssl_sock:
                     ssl_sock.close()
                     ssl_sock = None
@@ -475,20 +482,20 @@ class Http(object):
                 if len(_pool[poolkey]) < 5 and random.random() < 0.5:
                     break
                 ssl_sock = _pool[poolkey].pop()
-                if time.time() - ssl_sock.mtime > 60:
+                if time.time() - ssl_sock.mtime > 20:
                     sock = ssl_sock.sock
                     del ssl_sock.sock
                     ssl_sock.close()
                     sock.close()
                 else:
                     break
-            if ssl_sock:
+            if ssl_sock and hasattr(ssl_sock, 'sock'):
                 logging.debug('Http.create_ssl_connection reuse %s for (%r, %r) as poolkey=%r', ssl_sock, host, port, poolkey)
                 return ssl_sock
         iplist = self.dns_resolve(host)
         for i in xrange(self.max_retry):
             window = self.window
-            ips = random.sample(iplist, min(len(iplist), int(window)+i))
+            ips = sorted(iplist, key=lambda x:(self.window_ipr[x], random.random()), reverse=True)[:min(len(iplist), int(window)+i)]
             queue = gevent.queue.Queue()
             for ip in ips:
                 gevent.spawn(_create_ssl_connection, (ip, port), timeout, queue)
@@ -502,7 +509,9 @@ class Http(object):
                             self.window_ack = 0
                             self.window = window - 1
                             logging.info('Http.create_ssl_connection to %s, port=%r successed, switch window=%r', ips, port, self.window)
-                    ssl_sock.mtime = time.time()
+                    self.window_ipr[ssl_sock.getpeername()[0]] += window
+                    if self.window_ipr[ssl_sock.getpeername()[0]] > 4000:
+                        self.window_ipr.clear()
                     return ssl_sock
             else:
                 logging.warning('Http.create_ssl_connection to %s, port=%r return None, try again.', ips, port)
@@ -514,6 +523,52 @@ class Http(object):
                 self.window = len(iplist)
             self.window_ack = 0
             logging.error('Http.create_ssl_connection to %s, port=%r failed, switch window=%r', iplist, port, self.window)
+
+    def __update_window_ipr(self):
+        max_timeout = 30
+        def update1(ip):
+            times = None
+            try:
+                start = time.time()
+                socket.create_connection((ip, 443), timeout=max_timeout).close()
+                end = time.time()
+                times = end-start
+                logging.info('__update_window_ipr ip=%r times=%r', ip, times)
+            except socket.error as e:
+                pass
+            if times is not None:
+                self.window_ipr[ip] = max_timeout-times
+        def update2(ip):
+            times = None
+            sock = None
+            ssl_sock = None
+            start = time.time()
+            try:
+                with gevent.timeout.Timeout(max_timeout):
+                    sock = socket.create_connection((ip, 443))
+                    ssl_sock = ssl.wrap_socket(sock)
+                    times = times = time.time() - start
+                logging.info('__update_window_ipr ip=%r times=%r', ip, times)
+            except Exception as e:
+                times = time.time() - start
+            finally:
+                if ssl_sock:
+                    ssl_sock.close()
+                if sock:
+                    sock.close()
+            if times is not None:
+                self.window_ipr[ip] = max_timeout-times
+        update = update2 if hasattr(gevent, 'timeout') else update1
+        while 1:
+            try:
+                pool = gevent.pool.Pool(10)
+                for ip in self.window_ipr:
+                    pool.spawn(update, ip)
+                pool.join()
+            except Exception as e:
+                logging.exception('__update_window_ipr error:%s', e)
+            finally:
+                time.sleep(180)
 
     def create_connection_withproxy(self, (host, port), timeout=None, source_address=None, proxy=None):
         assert isinstance(proxy, (list, tuple, ))
@@ -1688,7 +1743,7 @@ class DNSServer(gevent.server.DatagramServer):
     max_retry = 2
     max_cache_size = 2000
     timeout   = 3
-    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13', '59.24.3.173'])
+    dns_blacklist = set(['4.36.66.178', '8.7.198.45', '37.61.54.158', '46.82.174.68', '59.24.3.173', '64.33.88.161', '64.33.99.47', '64.66.163.251', '65.104.202.252', '65.160.219.113', '66.45.252.237', '72.14.205.104', '72.14.205.99', '78.16.49.15', '93.46.8.89', '128.121.126.139', '159.106.121.75', '169.132.13.103', '192.67.198.6', '202.106.1.2', '202.181.7.85', '203.161.230.171', '207.12.88.98', '208.56.31.43', '209.145.54.50', '209.220.30.174', '209.36.73.33', '211.94.66.147', '213.169.251.35', '216.221.188.182', '216.234.179.13'])
 
     def __init__(self, *args, **kwargs):
         gevent.server.DatagramServer.__init__(self, *args, **kwargs)
